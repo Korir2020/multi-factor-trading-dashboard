@@ -1,0 +1,154 @@
+import streamlit as st
+import yfinance as yf
+import pandas as pd
+import numpy as np
+import requests
+from datetime import datetime, timezone
+
+# Page Configuration
+st.set_page_config(page_title="Multi-Factor Trading Intelligence Dashboard", layout="wide")
+
+st.title("⚡ Multi-Factor Trading Intelligence Command Center")
+st.markdown("Automated algorithmic confluence matrix processing time zones, volatility, key liquidity levels, and price action.")
+
+# --- SIDEBAR CONTROLS ---
+st.sidebar.header("Command Center Inputs")
+
+# Asset selection category
+asset_category = st.sidebar.selectbox("Market Category", ["Forex Majors", "Global Indices", "Commodities & Crypto"])
+
+if asset_category == "Forex Majors":
+    symbol_input = st.sidebar.selectbox("Select Asset", ["EURUSD=X", "GBPUSD=X", "USDJPY=X", "AUDUSD=X"])
+elif asset_category == "Global Indices":
+    symbol_input = st.sidebar.selectbox("Select Index", ["^GSPC", "^IXIC", "^DJI", "^FTSE"])
+else:
+    symbol_input = st.sidebar.selectbox("Select Asset", ["GC=F", "CL=F", "BTC-USD", "ETH-USD"])
+
+st.sidebar.divider()
+st.sidebar.header("📱 Telegram Alert Configuration")
+telegram_token = st.sidebar.text_input("Bot Token", type="password", placeholder="12345678:ABCDefg...")
+telegram_chat_id = st.sidebar.text_input("Chat ID", placeholder="123456789")
+send_alert_toggle = st.sidebar.checkbox("Enable Push Notifications on High Confluence", value=False)
+
+refresh_data = st.sidebar.button("Run Multi-Factor Analysis")
+
+# Function to send Telegram alerts
+def send_telegram_alert(token, chat_id, message):
+    try:
+        url = f"https://api.telegram.org/bot{token}/sendMessage"
+        payload = {"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}
+        response = requests.post(url, json=payload)
+        return response.json().get("ok", False)
+    except Exception as e:
+        return False
+
+# --- DATA ENGINE ---
+if refresh_data or symbol_input:
+    with st.spinner(f"Executing multi-factor data ingest and algorithmic scoring for {symbol_input}..."):
+        try:
+            ticker = yf.Ticker(symbol_input)
+            df_daily = ticker.history(period="10d", interval="1d")
+            df_intraday = ticker.history(period="2d", interval="15m")
+            
+            if len(df_daily) < 5 or df_intraday.empty:
+                st.error("Insufficient market data returned for this ticker. Try another symbol.")
+            else:
+                # 1. Key Institutional Levels (PDH / PDL / PDC)
+                prev_day = df_daily.iloc[-2]
+                pdh = prev_day['High']
+                pdl = prev_day['Low']
+                pdc = prev_day['Close']
+                
+                current_price = df_intraday['Close'].iloc[-1]
+                
+                # 2. Volatility Calculation (ATR approximation)
+                high_low = df_daily['High'] - df_daily['Low']
+                atr = high_low.rolling(window=5).mean().iloc[-1]
+                
+                # 3. Session & Time Zone Filters (UTC)
+                now_utc = datetime.now(timezone.utc)
+                current_hour = now_utc.hour
+                
+                if 7 <= current_hour < 12:
+                    session = "London Session (Active Liquidity)"
+                    session_multiplier = 1.2
+                elif 12 <= current_hour < 16:
+                    session = "London / NY Overlap (Peak Volatility)"
+                    session_multiplier = 2.0
+                elif 16 <= current_hour < 21:
+                    session = "New York Session (Steady Flow)"
+                    session_multiplier = 1.0
+                else:
+                    session = "Asian Session / Outside Core Hours (Low Liquidity)"
+                    session_multiplier = 0.5
+
+                # --- EXECUTIVE METRICS ROW ---
+                col1, col2, col3, col4 = st.columns(4)
+                col1.metric("Current Price", round(current_price, 4))
+                col2.metric("Previous Day High (PDH)", round(pdh, 4))
+                col3.metric("Previous Day Low (PDL)", round(pdl, 4))
+                col4.metric("Estimated ATR Volatility", round(atr, 4))
+
+                st.divider()
+
+                # --- ADVANCED CONFLUENCE SCORING MATRIX ---
+                st.subheader("Algorithmic Confluence Scorecard")
+                
+                score = 0
+                max_score = 3
+                signals = []
+
+                # Factor 1: Key Level Sweep
+                if current_price >= pdh:
+                    signals.append(("🚨 LIQUIDITY SWEEP: Price testing or exceeding Previous Day High (Potential Reversal/Breakout)", "warning"))
+                    score += 1
+                elif current_price <= pdl:
+                    signals.append(("🚨 LIQUIDITY SWEEP: Price testing or exceeding Previous Day Low (Potential Reversal/Breakout)", "warning"))
+                    score += 1
+                else:
+                    signals.append(("⚪ Price is trading cleanly inside the Previous Day Range.", "info"))
+
+                # Factor 2: Session Volatility Weight
+                if session_multiplier >= 1.2:
+                    signals.append((f"✅ SESSION ALIGNMENT: Active high-volume window ({session}).", "success"))
+                    score += 1
+                else:
+                    signals.append((f"⚠️ LOW LIQUIDITY WARNING: Current window is {session}. Avoid breakout trades.", "error"))
+
+                # Factor 3: Price Distance from Close
+                price_diff_pct = ((current_price - pdc) / pdc) * 100
+                signals.append((f"📊 Daily Momentum Delta: {round(price_diff_pct, 2)}% relative to previous close.", "info"))
+
+                # Render Signals
+                for text, status in signals:
+                    if status == "warning":
+                        st.warning(text)
+                    elif status == "error":
+                        st.error(text)
+                    elif status == "success":
+                        st.success(text)
+                    else:
+                        st.info(text)
+
+                # Overall Score Gauge
+                st.markdown(f"### Confluence Rating: **{score} / 3 Factors Aligned**")
+                
+                # Trigger Alert Logic
+                if score >= 2:
+                    st.success("🟢 STATUS: Setup meets multi-factor threshold criteria. Ready for human review.")
+                    if send_alert_toggle and telegram_token and telegram_chat_id:
+                        alert_msg = f"🚨 *TRADING CONFLUENCE ALERT* 🚨\n\n*Asset:* {symbol_input}\n*Price:* {round(current_price, 4)}\n*Score:* {score}/3 Factors Aligned\n*Session:* {session}"
+                        success_sent = send_telegram_alert(telegram_token, telegram_chat_id, alert_msg)
+                        if success_sent:
+                            st.toast("📲 Telegram push alert sent successfully!", icon="🚀")
+                else:
+                    st.warning("🟡 STATUS: Confluence criteria unmet. Stand down and wait for setup parameters.")
+
+                st.divider()
+
+                # --- INTERACTIVE VISUAL CHARTING ---
+                st.subheader("Intraday Price Action & Structure")
+                st.line_chart(df_intraday['Close'])
+
+        except Exception as e:
+            st.error(f"An error occurred during data ingestion: {e}")
