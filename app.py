@@ -192,7 +192,7 @@ if refresh_data or symbol_input:
                     elif status == "success": st.success(text)
                     else: st.info(text)
 
-                st.markdown(### f"Total Confluence Rating: **{score} / 5 Factors Aligned**")
+                st.markdown(f"### Total Confluence Rating: **{score} / 5 Factors Aligned**")
 
                 if score >= 4:
                     st.success("🟢 STATUS: Elite multi-factor setup confirmed. Execution parameters locked.")
